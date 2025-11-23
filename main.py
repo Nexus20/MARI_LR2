@@ -303,44 +303,77 @@ def analyze_results(experiments_dict, param_name: str):
     fastest = min(experiments_dict.items(), key=lambda x: x[1]['mean_time'])
     
     print(f"\nНайкраще середнє значення:")
-    print(f"  Параметр: {best_by_mean[0]}")
-    print(f"  Mean: {best_by_mean[1]['mean']:.6e}")
+    print(f"   Параметр: {best_by_mean[0]}")
+    print(f"   Mean: {best_by_mean[1]['mean']:.6e}")
     
     print(f"\nНайкраще абсолютне значення:")
-    print(f"  Параметр: {best_by_best[0]}")
-    print(f"  Best: {best_by_best[1]['best']:.6e}")
+    print(f"   Параметр: {best_by_best[0]}")
+    print(f"   Best: {best_by_best[1]['best']:.6e}")
     
     print(f"\nНайстабільніший (найменше std):")
-    print(f"  Параметр: {best_by_std[0]}")
-    print(f"  Std: {best_by_std[1]['std']:.6e}")
+    print(f"   Параметр: {best_by_std[0]}")
+    print(f"   Std: {best_by_std[1]['std']:.6e}")
     
     print(f"\nНайшвидший:")
-    print(f"  Параметр: {fastest[0]}")
-    print(f"  Час: {fastest[1]['mean_time']:.3f}s")
+    print(f"   Параметр: {fastest[0]}")
+    print(f"   Час: {fastest[1]['mean_time']:.3f}s")
     
     # Висновки
     print("\nВИСНОВКИ:")
     
-    if best_by_mean[0] == best_by_best[0]:
-        print(f"  • Параметр {best_by_mean[0]} демонструє найкращі результати як за середнім,")
-        print(f"    так і за абсолютним значенням.")
-    else:
-        print(f"  • Параметр {best_by_mean[0]} має найкраще середнє значення.")
-        print(f"  • Параметр {best_by_best[0]} досяг найкращого абсолютного результату.")
+    # Перевірка, чи всі найкращі параметри однакові
+    all_same = (best_by_mean[0] == best_by_best[0] == best_by_std[0])
     
-    if best_by_std[1]['std'] < best_by_mean[1]['mean'] * 0.1:
-        print(f"  • Параметр {best_by_std[0]} забезпечує високу стабільність результатів")
-        print(f"    (стандартне відхилення менше 10% від середнього).")
+    if all_same:
+        print(f"   • Параметр {best_by_mean[0]} є оптимальним за всіма критеріями:")
+        print(f"     найкраще середнє, найкращий результат та найвища стабільність.")
+    else:
+        if best_by_mean[0] == best_by_best[0]:
+            print(f"   • Параметр {best_by_mean[0]} забезпечує найкращі результати")
+            print(f"     (як середнє, так і абсолютне значення).")
+        else:
+            print(f"   • Параметр {best_by_mean[0]} має найкраще середнє значення.")
+            print(f"   • Параметр {best_by_best[0]} досяг найкращого абсолютного результату.")
+        
+        if best_by_std[0] not in [best_by_mean[0], best_by_best[0]]:
+            print(f"   • Параметр {best_by_std[0]} найстабільніший (мінімальне відхилення).")
     
     # Компроміс швидкість/якість
     if fastest[0] == best_by_mean[0]:
-        print(f"  • Оптимальний вибір: {fastest[0]} (найкращий результат + найшвидший).")
+        print(f"\n   РЕКОМЕНДАЦІЯ: Використовуйте параметр {fastest[0]}")
+        print(f"   (оптимальний баланс: найкраща якість + найшвидший)")
     else:
-        quality_diff = (best_by_mean[1]['mean'] / fastest[1]['mean'] - 1) * 100
-        time_diff = (fastest[1]['mean_time'] / best_by_mean[1]['mean_time'] - 1) * 100
-        print(f"  • Компроміс швидкість/якість:")
-        print(f"    - {fastest[0]}: швидше на {abs(time_diff):.1f}%, але якість {'гірша' if quality_diff > 0 else 'краща'} на {abs(quality_diff):.1f}%")
-        print(f"    - {best_by_mean[0]}: найкраща якість, але повільніше на {abs(time_diff):.1f}%")
+        # Порівнюємо найшвидший параметр з найкращим за якістю
+        fastest_time = fastest[1]['mean_time']
+        best_time = best_by_mean[1]['mean_time']
+        fastest_quality = fastest[1]['mean']
+        best_quality = best_by_mean[1]['mean']
+        
+        # Скільки разів швидше/повільніше
+        if fastest_time > 0 and best_time > 0:
+            time_ratio = best_time / fastest_time
+        else:
+            time_ratio = 1.0
+            
+        # Скільки разів гірше/краще за якістю (менше значення = краще)
+        if fastest_quality > 0 and best_quality > 0:
+            quality_ratio = fastest_quality / best_quality
+        else:
+            quality_ratio = 1.0
+        
+        print(f"\n   Компроміс швидкість/якість:")
+        print(f"   • Параметр {fastest[0]} (найшвидший):")
+        print(f"     - Час: {fastest_time:.3f}s (швидше в {time_ratio:.2f}x)")
+        if quality_ratio > 1.01:
+            print(f"     - Якість: {fastest_quality:.3e} (гірше в {quality_ratio:.2f}x)")
+        elif quality_ratio < 0.99:
+            print(f"     - Якість: {fastest_quality:.3e} (краще в {1/quality_ratio:.2f}x)")
+        else:
+            print(f"     - Якість: {fastest_quality:.3e} (приблизно однакова)")
+        
+        print(f"   • Параметр {best_by_mean[0]} (найкраща якість):")
+        print(f"     - Час: {best_time:.3f}s (повільніше в {time_ratio:.2f}x)")
+        print(f"     - Якість: {best_quality:.3e} (найкраща)")
     
     print("=" * 80)
 
