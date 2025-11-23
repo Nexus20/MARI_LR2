@@ -220,6 +220,129 @@ def plot_convergence(histories: List[List[float]], title: str):
     plt.legend()
     plt.show()
 
+def experiment_inertia(f, bounds, base_cfg: PSOConfig, w_values=(0.4, 0.7, 0.9), n_runs=10):
+    summaries = {}
+    histories_by_w = {}
+
+    for w in w_values:
+        cfg = PSOConfig(**{**base_cfg.__dict__, "w": w})
+        exp = run_multiple_experiments(f, bounds, cfg, n_runs=n_runs)
+        summaries[w] = exp["statistics"]
+        histories_by_w[w] = exp["histories"]
+
+    return summaries, histories_by_w
+
+def experiment_swarm_size(f, bounds, base_cfg: PSOConfig, sizes=(20, 40, 60, 80, 100), n_runs=10):
+    summaries = {}
+    histories_by_n = {}
+
+    for n in sizes:
+        cfg = PSOConfig(**{**base_cfg.__dict__, "n_particles": n})
+        exp = run_multiple_experiments(f, bounds, cfg, n_runs=n_runs)
+        summaries[n] = exp["statistics"]
+        histories_by_n[n] = exp["histories"]
+
+    return summaries, histories_by_n
+
+def experiment_coefficients(f, bounds, base_cfg: PSOConfig, c_pairs=None, n_runs=10):
+    """
+    Досліджує вплив когнітивних (c1) та соціальних (c2) коефіцієнтів.
+    """
+    if c_pairs is None:
+        c_pairs = [(1.5, 1.5), (2.0, 2.0), (2.05, 2.05), (2.5, 0.5), (0.5, 2.5)]
+    
+    summaries = {}
+    histories_by_c = {}
+
+    for c1, c2 in c_pairs:
+        cfg = PSOConfig(**{**base_cfg.__dict__, "c1": c1, "c2": c2})
+        exp = run_multiple_experiments(f, bounds, cfg, n_runs=n_runs)
+        summaries[(c1, c2)] = exp["statistics"]
+        histories_by_c[(c1, c2)] = exp["histories"]
+
+    return summaries, histories_by_c
+
+def print_comparison_table(experiments_dict, param_name: str):
+    """
+    Виводить порівняльну таблицю результатів експериментів.
+    
+    Args:
+        experiments_dict: словник {параметр: statistics}
+        param_name: назва параметра для заголовку
+    """
+    print("\n" + "=" * 100)
+    print(f"ПОРІВНЯЛЬНА ТАБЛИЦЯ: ВПЛИВ {param_name.upper()}")
+    print("=" * 100)
+    print(f"{'Параметр':<20} | {'Mean ± Std':<25} | {'Best':<12} | {'Worst':<12} | {'Median':<12} | {'Час (s)':<10}")
+    print("-" * 100)
+    
+    for param, stats in experiments_dict.items():
+        param_str = str(param)
+        mean_std = f"{stats['mean']:.3e} ± {stats['std']:.3e}"
+        best = f"{stats['best']:.3e}"
+        worst = f"{stats['worst']:.3e}"
+        median = f"{stats['median']:.3e}"
+        time_str = f"{stats['mean_time']:.3f}"
+        
+        print(f"{param_str:<20} | {mean_std:<25} | {best:<12} | {worst:<12} | {median:<12} | {time_str:<10}")
+    
+    print("=" * 100)
+
+def analyze_results(experiments_dict, param_name: str):
+    """
+    Автоматичний аналіз результатів експериментів.
+    """
+    print("\n" + "=" * 80)
+    print(f"АНАЛІЗ РЕЗУЛЬТАТІВ: {param_name.upper()}")
+    print("=" * 80)
+    
+    # Знаходимо найкращі параметри за різними критеріями
+    best_by_mean = min(experiments_dict.items(), key=lambda x: x[1]['mean'])
+    best_by_best = min(experiments_dict.items(), key=lambda x: x[1]['best'])
+    best_by_std = min(experiments_dict.items(), key=lambda x: x[1]['std'])
+    fastest = min(experiments_dict.items(), key=lambda x: x[1]['mean_time'])
+    
+    print(f"\nНайкраще середнє значення:")
+    print(f"  Параметр: {best_by_mean[0]}")
+    print(f"  Mean: {best_by_mean[1]['mean']:.6e}")
+    
+    print(f"\nНайкраще абсолютне значення:")
+    print(f"  Параметр: {best_by_best[0]}")
+    print(f"  Best: {best_by_best[1]['best']:.6e}")
+    
+    print(f"\nНайстабільніший (найменше std):")
+    print(f"  Параметр: {best_by_std[0]}")
+    print(f"  Std: {best_by_std[1]['std']:.6e}")
+    
+    print(f"\nНайшвидший:")
+    print(f"  Параметр: {fastest[0]}")
+    print(f"  Час: {fastest[1]['mean_time']:.3f}s")
+    
+    # Висновки
+    print("\nВИСНОВКИ:")
+    
+    if best_by_mean[0] == best_by_best[0]:
+        print(f"  • Параметр {best_by_mean[0]} демонструє найкращі результати як за середнім,")
+        print(f"    так і за абсолютним значенням.")
+    else:
+        print(f"  • Параметр {best_by_mean[0]} має найкраще середнє значення.")
+        print(f"  • Параметр {best_by_best[0]} досяг найкращого абсолютного результату.")
+    
+    if best_by_std[1]['std'] < best_by_mean[1]['mean'] * 0.1:
+        print(f"  • Параметр {best_by_std[0]} забезпечує високу стабільність результатів")
+        print(f"    (стандартне відхилення менше 10% від середнього).")
+    
+    # Компроміс швидкість/якість
+    if fastest[0] == best_by_mean[0]:
+        print(f"  • Оптимальний вибір: {fastest[0]} (найкращий результат + найшвидший).")
+    else:
+        quality_diff = (best_by_mean[1]['mean'] / fastest[1]['mean'] - 1) * 100
+        time_diff = (fastest[1]['mean_time'] / best_by_mean[1]['mean_time'] - 1) * 100
+        print(f"  • Компроміс швидкість/якість:")
+        print(f"    - {fastest[0]}: швидше на {abs(time_diff):.1f}%, але якість {'гірша' if quality_diff > 0 else 'краща'} на {abs(quality_diff):.1f}%")
+        print(f"    - {best_by_mean[0]}: найкраща якість, але повільніше на {abs(time_diff):.1f}%")
+    
+    print("=" * 80)
 
 if __name__ == "__main__":
     # Параметри задачі
@@ -256,3 +379,74 @@ if __name__ == "__main__":
 
     plot_convergence(experiments["histories"],
                  title=f"PSO convergence on Griewank ({d}D), classic")
+    
+    # Дослідження впливу інерції w
+    print("\n" + "="*80)
+    print("ЕКСПЕРИМЕНТ 1: ВПЛИВ ІНЕРЦІЇ w НА ЗБІЖНІСТЬ")
+    print("="*80)
+    summaries_w, histories_w = experiment_inertia(griewank, bounds, cfg, w_values=(0.4,0.7,0.9))
+    
+    print_comparison_table(summaries_w, "Інерція (w)")
+    analyze_results(summaries_w, "Інерція (w)")
+
+    # графік середніх кривих для різних w
+    plt.figure(figsize=(10, 6))
+    for w, histories in histories_w.items():
+        max_len = max(len(h) for h in histories)
+        H = np.array([h + [h[-1]]*(max_len-len(h)) for h in histories])
+        plt.plot(H.mean(axis=0), label=f"w={w}", linewidth=2)
+    plt.yscale("log")
+    plt.xlabel("Iteration", fontsize=12)
+    plt.ylabel("Mean best-so-far f(x)", fontsize=12)
+    plt.title("Effect of inertia weight (w) on convergence", fontsize=14)
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=11)
+    plt.tight_layout()
+    plt.show()
+
+    # Дослідження впливу розміру рою
+    print("\n" + "="*80)
+    print("ЕКСПЕРИМЕНТ 2: ВПЛИВ РОЗМІРУ РОЮ НА ЗБІЖНІСТЬ")
+    print("="*80)
+    summaries_n, histories_n = experiment_swarm_size(griewank, bounds, cfg, sizes=(20,40,60,80,100))
+    
+    print_comparison_table(summaries_n, "Розмір рою (n_particles)")
+    analyze_results(summaries_n, "Розмір рою")
+
+    plt.figure(figsize=(10, 6))
+    for n, histories in histories_n.items():
+        max_len = max(len(h) for h in histories)
+        H = np.array([h + [h[-1]]*(max_len-len(h)) for h in histories])
+        plt.plot(H.mean(axis=0), label=f"n={n}", linewidth=2)
+    plt.yscale("log")
+    plt.xlabel("Iteration", fontsize=12)
+    plt.ylabel("Mean best-so-far f(x)", fontsize=12)
+    plt.title("Effect of swarm size on convergence", fontsize=14)
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=11)
+    plt.tight_layout()
+    plt.show()
+
+    # Дослідження впливу когнітивних і соціальних коефіцієнтів
+    print("\n" + "="*80)
+    print("ЕКСПЕРИМЕНТ 3: ВПЛИВ КОЕФІЦІЄНТІВ c1 ТА c2 НА ЗБІЖНІСТЬ")
+    print("="*80)
+    c_pairs = [(1.5, 1.5), (2.0, 2.0), (2.05, 2.05), (2.5, 0.5), (0.5, 2.5)]
+    summaries_c, histories_c = experiment_coefficients(griewank, bounds, cfg, c_pairs=c_pairs)
+    
+    print_comparison_table(summaries_c, "Коефіцієнти (c1, c2)")
+    analyze_results(summaries_c, "Коефіцієнти c1, c2")
+
+    plt.figure(figsize=(10, 6))
+    for (c1, c2), histories in histories_c.items():
+        max_len = max(len(h) for h in histories)
+        H = np.array([h + [h[-1]]*(max_len-len(h)) for h in histories])
+        plt.plot(H.mean(axis=0), label=f"c1={c1}, c2={c2}", linewidth=2)
+    plt.yscale("log")
+    plt.xlabel("Iteration", fontsize=12)
+    plt.ylabel("Mean best-so-far f(x)", fontsize=12)
+    plt.title("Effect of cognitive (c1) and social (c2) coefficients", fontsize=14)
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=9)
+    plt.tight_layout()
+    plt.show()
