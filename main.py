@@ -51,7 +51,7 @@ def pso_gbest(f: Callable[[np.ndarray], float], bounds: np.ndarray, cfg: PSOConf
     return {"best_x": gbest_X, "best_f": gbest_f}
 
 if __name__ == "__main__":
-    d = 2  # можна змінити на твоє d
+    d = 2  # можна змінити на іншу розмірність
     bounds = np.array([[-600, 600]] * d)
 
     cfg = PSOConfig(n_particles=40, w=0.7, c1=1.5, c2=1.5, max_iters=500, seed=2)
