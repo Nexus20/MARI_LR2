@@ -1,5 +1,6 @@
 import numpy as np
 import time
+import matplotlib.pyplot as plt
 from typing import Callable, Dict, List
 from pso_config import PSOConfig
 
@@ -199,6 +200,27 @@ def print_results(experiments: Dict, dimension: int):
     print(f"  f(x*) = 0")
     print("=" * 80)
 
+def plot_convergence(histories: List[List[float]], title: str):
+    """
+    Малює криві best-so-far для всіх прогонів + середню.
+    """
+    max_len = max(len(h) for h in histories)
+    H = np.array([h + [h[-1]]*(max_len-len(h)) for h in histories])
+    mean_curve = H.mean(axis=0)
+
+    plt.figure()
+    for h in histories:
+        plt.plot(h, alpha=0.25)
+    plt.plot(mean_curve, linewidth=2, label="mean best-so-far")
+    plt.yscale("log")
+    plt.xlabel("Iteration")
+    plt.ylabel("Best-so-far f(x)")
+    plt.title(title)
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
+
 if __name__ == "__main__":
     # Параметри задачі
     d = 2  # Розмірність (можна змінити на 2, 5, 10, 30 тощо)
@@ -231,3 +253,6 @@ if __name__ == "__main__":
     
     # Виведення результатів
     print_results(experiments, d)
+
+    plot_convergence(experiments["histories"],
+                 title=f"PSO convergence on Griewank ({d}D), classic")
