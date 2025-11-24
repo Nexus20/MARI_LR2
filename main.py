@@ -90,11 +90,87 @@ def pso_gbest(f: Callable[[np.ndarray], float], bounds: np.ndarray, cfg: PSOConf
         "n_evals": n_evals
     }
 
+# --- PSO with Constriction Factor (Clerc & Kennedy) ---
+def pso_constriction(f: Callable[[np.ndarray], float], bounds: np.ndarray, cfg: PSOConfig, chi: float = 0.729) -> Dict:
+    """
+    Particle Swarm Optimization з constriction factor (χ) за Clerc & Kennedy.
+    
+    Формула оновлення швидкості:
+    v_i(t+1) = χ · [v_i(t) + c1·r1·(pbest_i - x_i(t)) + c2·r2·(gbest - x_i(t))]
+    
+    Constriction factor χ забезпечує збіжність без потреби в явному обмеженні швидкості.
+    Типові значення: χ = 0.729, c1 = c2 = 2.05
+    
+    Параметри:
+    - chi (χ): constriction factor, зазвичай 0.729
+    - c1, c2: когнітивна та соціальна константи, зазвичай 2.05
+    """
+    rng = np.random.default_rng(cfg.seed)
+    D = bounds.shape[0]
+    lo, hi = bounds[:, 0], bounds[:, 1]
+    span = hi - lo
+
+    # Ініціалізація позицій та швидкостей
+    X = lo + rng.random((cfg.n_particles, D)) * span
+    V = rng.uniform(-span, span, size=(cfg.n_particles, D)) * 0.1
+
+    # Ініціалізація особистих найкращих позицій
+    pbest_X = X.copy()
+    pbest_f = np.array([f(x) for x in X])
+
+    # Ініціалізація глобального найкращого
+    g_idx = np.argmin(pbest_f)
+    gbest_X = pbest_X[g_idx].copy()
+    gbest_f = float(pbest_f[g_idx])
+    
+    # Історія збіжності
+    history = [gbest_f]
+    n_evals = cfg.n_particles
+
+    for iteration in range(cfg.max_iters):
+        # Генерація випадкових коефіцієнтів
+        r1 = rng.random((cfg.n_particles, D))
+        r2 = rng.random((cfg.n_particles, D))
+
+        # Оновлення швидкості з constriction factor
+        V = chi * (V + cfg.c1 * r1 * (pbest_X - X) + cfg.c2 * r2 * (gbest_X - X))
+
+        # Оновлення позицій
+        X = X + V
+        X = np.clip(X, lo, hi)
+
+        # Оцінка функції для всіх частинок
+        f_vals = np.array([f(x) for x in X])
+        n_evals += cfg.n_particles
+        
+        # Оновлення особистих найкращих позицій
+        improve = f_vals < pbest_f
+        pbest_X[improve] = X[improve]
+        pbest_f[improve] = f_vals[improve]
+
+        # Оновлення глобального найкращого
+        g_idx = np.argmin(pbest_f)
+        if pbest_f[g_idx] < gbest_f:
+            gbest_f = float(pbest_f[g_idx])
+            gbest_X = pbest_X[g_idx].copy()
+        
+        history.append(gbest_f)
+
+    return {
+        "best_x": gbest_X, 
+        "best_f": gbest_f,
+        "history": history,
+        "n_evals": n_evals,
+        "chi": chi
+    }
+
 def run_multiple_experiments(
     f: Callable[[np.ndarray], float],
     bounds: np.ndarray,
     cfg: PSOConfig,
-    n_runs: int = 10
+    n_runs: int = 10,
+    use_constriction: bool = False,
+    chi: float = 0.729
 ) -> Dict:
     """
     Запускає PSO n_runs разів з різними seed і збирає статистику.
@@ -112,8 +188,12 @@ def run_multiple_experiments(
     times = []
     n_evals_list = []
     
-    print(f"Запуск {n_runs} незалежних прогонів PSO...")
-    print(f"Параметри: n_particles={cfg.n_particles}, w={cfg.w}, c1={cfg.c1}, c2={cfg.c2}, max_iters={cfg.max_iters}")
+    method_name = "PSO з constriction factor (χ)" if use_constriction else "PSO зі стандартною інерцією"
+    print(f"Запуск {n_runs} незалежних прогонів {method_name}...")
+    if use_constriction:
+        print(f"Параметри: n_particles={cfg.n_particles}, χ={chi}, c1={cfg.c1}, c2={cfg.c2}, max_iters={cfg.max_iters}")
+    else:
+        print(f"Параметри: n_particles={cfg.n_particles}, w={cfg.w}, c1={cfg.c1}, c2={cfg.c2}, max_iters={cfg.max_iters}")
     print("-" * 80)
     
     for i in range(n_runs):
@@ -128,7 +208,10 @@ def run_multiple_experiments(
         )
         
         start_time = time.time()
-        result = pso_gbest(f, bounds, run_cfg)
+        if use_constriction:
+            result = pso_constriction(f, bounds, run_cfg, chi=chi)
+        else:
+            result = pso_gbest(f, bounds, run_cfg)
         elapsed = time.time() - start_time
         
         results.append(result["best_f"])
@@ -227,7 +310,7 @@ def experiment_inertia(f, bounds, base_cfg: PSOConfig, w_values=(0.4, 0.7, 0.9),
     for w in w_values:
         cfg = PSOConfig(**{**base_cfg.__dict__, "w": w})
         exp = run_multiple_experiments(f, bounds, cfg, n_runs=n_runs)
-        summaries[w] = exp["statistics"]
+        summaries[w] = exp
         histories_by_w[w] = exp["histories"]
 
     return summaries, histories_by_w
@@ -239,7 +322,7 @@ def experiment_swarm_size(f, bounds, base_cfg: PSOConfig, sizes=(20, 40, 60, 80,
     for n in sizes:
         cfg = PSOConfig(**{**base_cfg.__dict__, "n_particles": n})
         exp = run_multiple_experiments(f, bounds, cfg, n_runs=n_runs)
-        summaries[n] = exp["statistics"]
+        summaries[n] = exp
         histories_by_n[n] = exp["histories"]
 
     return summaries, histories_by_n
@@ -257,7 +340,7 @@ def experiment_coefficients(f, bounds, base_cfg: PSOConfig, c_pairs=None, n_runs
     for c1, c2 in c_pairs:
         cfg = PSOConfig(**{**base_cfg.__dict__, "c1": c1, "c2": c2})
         exp = run_multiple_experiments(f, bounds, cfg, n_runs=n_runs)
-        summaries[(c1, c2)] = exp["statistics"]
+        summaries[(c1, c2)] = exp
         histories_by_c[(c1, c2)] = exp["histories"]
 
     return summaries, histories_by_c
@@ -276,8 +359,9 @@ def print_comparison_table(experiments_dict, param_name: str):
     print(f"{'Параметр':<20} | {'Mean ± Std':<25} | {'Best':<12} | {'Worst':<12} | {'Median':<12} | {'Час (s)':<10}")
     print("-" * 100)
     
-    for param, stats in experiments_dict.items():
+    for param, exp_data in experiments_dict.items():
         param_str = str(param)
+        stats = exp_data["statistics"]
         mean_std = f"{stats['mean']:.3e} ± {stats['std']:.3e}"
         best = f"{stats['best']:.3e}"
         worst = f"{stats['worst']:.3e}"
@@ -297,26 +381,26 @@ def analyze_results(experiments_dict, param_name: str):
     print("=" * 80)
     
     # Знаходимо найкращі параметри за різними критеріями
-    best_by_mean = min(experiments_dict.items(), key=lambda x: x[1]['mean'])
-    best_by_best = min(experiments_dict.items(), key=lambda x: x[1]['best'])
-    best_by_std = min(experiments_dict.items(), key=lambda x: x[1]['std'])
-    fastest = min(experiments_dict.items(), key=lambda x: x[1]['mean_time'])
+    best_by_mean = min(experiments_dict.items(), key=lambda x: x[1]['statistics']['mean'])
+    best_by_best = min(experiments_dict.items(), key=lambda x: x[1]['statistics']['best'])
+    best_by_std = min(experiments_dict.items(), key=lambda x: x[1]['statistics']['std'])
+    fastest = min(experiments_dict.items(), key=lambda x: x[1]['statistics']['mean_time'])
     
     print(f"\nНайкраще середнє значення:")
     print(f"   Параметр: {best_by_mean[0]}")
-    print(f"   Mean: {best_by_mean[1]['mean']:.6e}")
+    print(f"   Mean: {best_by_mean[1]['statistics']['mean']:.6e}")
     
     print(f"\nНайкраще абсолютне значення:")
     print(f"   Параметр: {best_by_best[0]}")
-    print(f"   Best: {best_by_best[1]['best']:.6e}")
+    print(f"   Best: {best_by_best[1]['statistics']['best']:.6e}")
     
     print(f"\nНайстабільніший (найменше std):")
     print(f"   Параметр: {best_by_std[0]}")
-    print(f"   Std: {best_by_std[1]['std']:.6e}")
+    print(f"   Std: {best_by_std[1]['statistics']['std']:.6e}")
     
     print(f"\nНайшвидший:")
     print(f"   Параметр: {fastest[0]}")
-    print(f"   Час: {fastest[1]['mean_time']:.3f}s")
+    print(f"   Час: {fastest[1]['statistics']['mean_time']:.3f}s")
     
     # Висновки
     print("\nВИСНОВКИ:")
@@ -344,10 +428,10 @@ def analyze_results(experiments_dict, param_name: str):
         print(f"   (оптимальний баланс: найкраща якість + найшвидший)")
     else:
         # Порівнюємо найшвидший параметр з найкращим за якістю
-        fastest_time = fastest[1]['mean_time']
-        best_time = best_by_mean[1]['mean_time']
-        fastest_quality = fastest[1]['mean']
-        best_quality = best_by_mean[1]['mean']
+        fastest_time = fastest[1]['statistics']['mean_time']
+        best_time = best_by_mean[1]['statistics']['mean_time']
+        fastest_quality = fastest[1]['statistics']['mean']
+        best_quality = best_by_mean[1]['statistics']['mean']
         
         # Скільки разів швидше/повільніше
         if fastest_time > 0 and best_time > 0:
@@ -374,6 +458,18 @@ def analyze_results(experiments_dict, param_name: str):
         print(f"   • Параметр {best_by_mean[0]} (найкраща якість):")
         print(f"     - Час: {best_time:.3f}s (повільніше в {time_ratio:.2f}x)")
         print(f"     - Якість: {best_quality:.3e} (найкраща)")
+        
+        # Рекомендація залежно від пріоритету
+        if time_ratio < 1.2 and quality_ratio > 1.5:
+            print(f"\n   РЕКОМЕНДАЦІЯ: Використовуйте параметр {best_by_mean[0]}")
+            print(f"   (незначна втрата швидкості, але суттєво краща якість)")
+        elif time_ratio > 2.0 and quality_ratio < 1.2:
+            print(f"\n   РЕКОМЕНДАЦІЯ: Використовуйте параметр {fastest[0]}")
+            print(f"   (значний виграш у швидкості при незначній втраті якості)")
+        else:
+            print(f"\n   РЕКОМЕНДАЦІЯ: Вибір залежить від пріоритету:")
+            print(f"   - Якщо важлива якість → {best_by_mean[0]}")
+            print(f"   - Якщо важлива швидкість → {fastest[0]}")
     
     print("=" * 80)
 
@@ -481,5 +577,106 @@ if __name__ == "__main__":
     plt.title("Effect of cognitive (c1) and social (c2) coefficients", fontsize=14)
     plt.grid(True, alpha=0.3)
     plt.legend(fontsize=9)
+    plt.tight_layout()
+    plt.show()
+
+    # ВИСОКИЙ РІВЕНЬ: Constriction Factor vs Classic PSO
+    print("\n" + "="*80)
+    print("ЕКСПЕРИМЕНТ 4: CONSTRICTION FACTOR (CLERC) VS КЛАСИЧНИЙ PSO")
+    print("="*80)
+    
+    # Класичний PSO з w=0.7, c1=c2=1.5
+    cfg_classic = PSOConfig(
+        n_particles=40,
+        w=0.7,
+        c1=1.5,
+        c2=1.5,
+        max_iters=500,
+        seed=42
+    )
+    
+    # Constriction factor PSO з χ=0.729, c1=c2=2.05
+    cfg_constriction = PSOConfig(
+        n_particles=40,
+        w=0.0,  # не використовується для constriction
+        c1=2.05,
+        c2=2.05,
+        max_iters=500,
+        seed=42
+    )
+    
+    print("\n--- Класичний PSO (w=0.7, c1=c2=1.5) ---")
+    exp_classic = run_multiple_experiments(
+        f=griewank,
+        bounds=bounds,
+        cfg=cfg_classic,
+        n_runs=10,
+        use_constriction=False
+    )
+    
+    print("\n--- Constriction Factor PSO (χ=0.729, c1=c2=2.05) ---")
+    exp_constriction = run_multiple_experiments(
+        f=griewank,
+        bounds=bounds,
+        cfg=cfg_constriction,
+        n_runs=10,
+        use_constriction=True,
+        chi=0.729
+    )
+    
+    # Таблиця порівняння
+    comparison = {
+        "Classic (w=0.7)": exp_classic,
+        "Constriction (χ=0.729)": exp_constriction
+    }
+    
+    print("\n" + "="*80)
+    print("ПОРІВНЯЛЬНА ТАБЛИЦЯ: CONSTRICTION FACTOR VS КЛАСИЧНИЙ PSO")
+    print("="*80)
+    print_comparison_table(comparison, "Метод")
+    analyze_results(comparison, "Метод")
+    
+    # Візуалізація порівняння
+    plt.figure(figsize=(12, 5))
+    
+    plt.subplot(1, 2, 1)
+    for hist in exp_classic["histories"]:
+        plt.plot(hist, alpha=0.3, color='blue')
+    max_len = max(len(h) for h in exp_classic["histories"])
+    H_classic = np.array([h + [h[-1]]*(max_len-len(h)) for h in exp_classic["histories"]])
+    plt.plot(H_classic.mean(axis=0), color='blue', linewidth=3, label='Classic (середнє)')
+    plt.yscale("log")
+    plt.xlabel("Iteration", fontsize=11)
+    plt.ylabel("Best-so-far f(x)", fontsize=11)
+    plt.title("Класичний PSO (w=0.7, c1=c2=1.5)", fontsize=12)
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    
+    plt.subplot(1, 2, 2)
+    for hist in exp_constriction["histories"]:
+        plt.plot(hist, alpha=0.3, color='red')
+    max_len = max(len(h) for h in exp_constriction["histories"])
+    H_constr = np.array([h + [h[-1]]*(max_len-len(h)) for h in exp_constriction["histories"]])
+    plt.plot(H_constr.mean(axis=0), color='red', linewidth=3, label='Constriction (середнє)')
+    plt.yscale("log")
+    plt.xlabel("Iteration", fontsize=11)
+    plt.ylabel("Best-so-far f(x)", fontsize=11)
+    plt.title("Constriction Factor (χ=0.729, c1=c2=2.05)", fontsize=12)
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Об'єднаний графік
+    plt.figure(figsize=(10, 6))
+    plt.plot(H_classic.mean(axis=0), color='blue', linewidth=2.5, label='Classic PSO (w=0.7, c1=c2=1.5)')
+    plt.plot(H_constr.mean(axis=0), color='red', linewidth=2.5, label='Constriction PSO (χ=0.729, c1=c2=2.05)')
+    plt.yscale("log")
+    plt.xlabel("Iteration", fontsize=12)
+    plt.ylabel("Mean best-so-far f(x)", fontsize=12)
+    plt.title("Constriction Factor vs Classic PSO: Convergence Comparison", fontsize=14)
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=11)
     plt.tight_layout()
     plt.show()
